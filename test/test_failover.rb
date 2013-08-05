@@ -1,6 +1,27 @@
 require 'helper'
 
 class TestFailover < Test::Unit::TestCase
+
+  context 'timeouts' do
+    should 'not lead to corrupt sockets' do
+      memcached(29125) do
+        dc = Dalli::Client.new ['localhost:29125'], :socket_max_failures => 5000000
+        begin
+          dc.set("test_123", {:test => "123"})
+          Timeout.timeout 0.001 do
+            1_000_000.times do
+              dc.set("test_123", {:test => "123"})
+            end
+            flunk("Did not timeout")
+          end
+        rescue Timeout::Error
+        end
+
+        assert_equal({:test => '123'}, dc.get("test_123"))
+      end
+    end
+  end
+
   context 'assuming some bad servers' do
 
     should 'silently reconnect if server hiccups' do
@@ -28,7 +49,7 @@ class TestFailover < Test::Unit::TestCase
           dc.set 'foo', 'bar'
           foo = dc.get 'foo'
           assert_equal foo, 'bar'
-          
+
           memcached_kill(29125)
 
           dc.set 'foo', 'bar'
@@ -51,7 +72,7 @@ class TestFailover < Test::Unit::TestCase
           dc.set 'a', 'a1'
           result = dc.get_multi ['a']
           assert_equal result, {'a' => 'a1'}
-          
+
           memcached_kill(29125)
 
           result = dc.get_multi ['a']
@@ -68,7 +89,7 @@ class TestFailover < Test::Unit::TestCase
           dc.set 'bar', 'bar1'
           result = dc.get_multi ['foo', 'bar']
           assert_equal result, {'foo' => 'foo1', 'bar' => 'bar1'}
-          
+
           memcached_kill(29125)
 
           dc.set 'foo', 'foo1'
@@ -92,7 +113,7 @@ class TestFailover < Test::Unit::TestCase
           result = dc.stats
           assert_instance_of Hash, result['localhost:29125']
           assert_instance_of Hash, result['localhost:29126']
-          
+
           memcached_kill(29125)
 
           dc = Dalli::Client.new ['localhost:29125', 'localhost:29126']

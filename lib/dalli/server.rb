@@ -8,7 +8,7 @@ module Dalli
     attr_accessor :port
     attr_accessor :weight
     attr_accessor :options
-    
+
     DEFAULTS = {
       # seconds between trying to contact a remote server
       :down_retry_delay => 1,
@@ -37,9 +37,10 @@ module Dalli
       @sock = nil
       @msg = nil
     end
-    
+
     # Chokepoint method for instrumentation
     def request(op, *args)
+      check_for_inprogress
       raise Dalli::NetworkError, "#{hostname}:#{port} is down: #{@error} #{@msg}" unless alive?
       begin
         send(op, *args)
@@ -79,6 +80,7 @@ module Dalli
       return unless @sock
       @sock.close rescue nil
       @sock = nil
+      @inprogress = false
     end
 
     def lock!
@@ -90,6 +92,10 @@ module Dalli
     # NOTE: Additional public methods should be overridden in Dalli::Threadsafe
 
     private
+
+    def check_for_inprogress
+      failure! if @inprogress
+    end
 
     def failure!
       Dalli.logger.info { "#{hostname}:#{port} failed (count: #{@fail_count})" }
@@ -103,8 +109,9 @@ module Dalli
         raise Dalli::NetworkError, "Socket operation failed, retrying..."
       end
     end
-    
+
     def down!
+      puts "down"
       close
 
       @last_down_at = Time.now
@@ -165,7 +172,7 @@ module Dalli
       write(req)
       generic_response unless multi?
     end
-    
+
     def replace(key, value, ttl, options)
       (value, flags) = serialize(key, value, options)
       req = [REQUEST, OPCODES[multi? ? :replaceq : :replace], key.bytesize, 8, 0, 0, value.bytesize + key.bytesize + 8, 0, 0, flags, ttl, key, value].pack(FORMAT[:replace])
@@ -195,7 +202,7 @@ module Dalli
       body = generic_response
       body ? longlong(*body.unpack('NN')) : body
     end
-    
+
     def incr(key, count, ttl, default)
       expiry = default ? ttl : 0xFFFFFFFF
       default ||= 0
@@ -206,7 +213,7 @@ module Dalli
       body = generic_response
       body ? longlong(*body.unpack('NN')) : body
     end
-    
+
     # Noop is a keepalive operation but also used to demarcate the end of a set of pipelined commands.
     # We need to read all the responses at once.
     def noop
@@ -361,19 +368,23 @@ module Dalli
 
     def write(bytes)
       begin
-        @sock.write(bytes)
+        @inprogress = true
+        result = @sock.write(bytes)
+        @inprogress = false
+        result
       rescue SystemCallError, Timeout::Error
         failure!
-        retry
       end
     end
 
     def read(count)
       begin
-        @sock.readfull(count)
+        @inprogress = true
+        data = @sock.readfull(count)
+        @inprogress = false
+        data
       rescue SystemCallError, Timeout::Error, EOFError
         failure!
-        retry
       end
     end
 
@@ -389,7 +400,6 @@ module Dalli
         raise
       rescue SystemCallError, Timeout::Error, EOFError
         failure!
-        retry
       end
     end
 
@@ -403,7 +413,7 @@ module Dalli
 
     REQUEST = 0x80
     RESPONSE = 0x81
-    
+
     RESPONSE_CODES = {
       0 => 'No error',
       1 => 'Key not found',
@@ -416,7 +426,7 @@ module Dalli
       0x81 => 'Unknown command',
       0x82 => 'Out of memory',
     }
-    
+
     OPCODES = {
       :get => 0x00,
       :set => 0x01,
@@ -442,7 +452,7 @@ module Dalli
       :auth_request => 0x21,
       :auth_continue => 0x22,
     }
-    
+
     HEADER = "CCnCCnNNQ"
     OP_FORMAT = {
       :get => 'a*',
@@ -472,7 +482,7 @@ module Dalli
     def need_auth?
       @options[:username] || ENV['MEMCACHE_USERNAME']
     end
-    
+
     def username
       @options[:username] || ENV['MEMCACHE_USERNAME']
     end

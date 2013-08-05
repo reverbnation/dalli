@@ -1,11 +1,11 @@
 Dalli Changelog
 =====================
 
-1.1.0
+1.0.5.reverb1
 =======
 
-- Remove support for Rails 2.3, add support for Rails 3.1
-- Fix socket failure retry logic, now you can restart memcached and Dalli won't complain!
+- Fix socket timeout on write problems, causes connection desync
+
 
 1.0.5
 =======
