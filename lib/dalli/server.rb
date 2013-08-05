@@ -111,7 +111,6 @@ module Dalli
     end
 
     def down!
-      puts "down"
       close
 
       @last_down_at = Time.now
